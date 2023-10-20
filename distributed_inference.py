@@ -63,7 +63,7 @@ def generate_distributed(data, generate_func):
         for i, d in enumerate(data[list_key]): 
             data['_dist'] += [{
                 'id': i,
-                'score': None,
+                'output': None,
                 'device': f'cuda:{i % world_size}'
             }]
     elif isinstance(data, list):
@@ -71,7 +71,7 @@ def generate_distributed(data, generate_func):
         for i, d in enumerate(data): 
             d['_dist'] = {
                 'id': i,
-                'score': None,
+                'output': None,
                 'device': f'cuda:{i % world_size}'
             }
     else:
@@ -91,13 +91,13 @@ def generate_distributed(data, generate_func):
             data_subset[entry_name] = [sent for i, sent in enumerate(data[0][entry_name]) if data[0]['_dist'][i]['device'] == device]
         scores = generate_func(**{k: v for k, v in data_subset.items() if not k.startswith('_')})
         for idx, g in zip(data_subset_ids, scores): 
-            data[0]['_dist'][idx]['score'] = g
+            data[0]['_dist'][idx]['output'] = g
     elif isinstance(data_subset, list):
         data_subset_ids = [data_subset[i]['_dist']['id'] for i in range(len(data_subset)) if data_subset[i]['_dist']['device'] == device]
         data_subset = [sent for i, sent in enumerate(data[0]) if data[0][i]['_dist']['device'] == device]
         scores = generate_func(data_subset)
         for idx, g in zip(data_subset_ids, scores): 
-            data[0][idx]['_dist']['score'] = g
+            data[0][idx]['_dist']['output'] = g
     
     # Wait for a response from all GPUs
     ack = [[None] for _ in range(world_size)]
@@ -112,11 +112,11 @@ def generate_distributed(data, generate_func):
 
     # Process the data from each GPU into a list of strings
     if isinstance(ack[0][0], dict):
-        full_results = [gen for gen in [i for j in [d[0]['_dist'] for d in ack] for i in j] if gen['score'] is not None]
-        final_scores = [g['score'] for g in sorted(full_results, key=lambda x: x['id'])]
+        full_results = [gen for gen in [i for j in [d[0]['_dist'] for d in ack] for i in j] if gen['output'] is not None]
+        final_scores = [g['output'] for g in sorted(full_results, key=lambda x: x['id'])]
     elif isinstance(ack[0][0], list):
-        full_results = [gen for gen in [i['_dist'] for j in [d[0] for d in ack] for i in j] if gen['score'] is not None]
-        final_scores = [g['score'] for g in sorted(full_results, key=lambda x: x['id'])]
+        full_results = [gen for gen in [i['_dist'] for j in [d[0] for d in ack] for i in j] if gen['output'] is not None]
+        final_scores = [g['output'] for g in sorted(full_results, key=lambda x: x['id'])]
 
     return final_scores
     
@@ -130,6 +130,9 @@ def generate_distributed_child(generate_func):
     # Wait for data from GPU 0s
     dist.broadcast_object_list(data, src=0)
 
+    if data[0] is None:
+        return
+
     # Create a copy of the data object for generation on the GPU (may not be necessary)
     data_subset = copy.deepcopy(data[0])
     if isinstance(data_subset, dict):
@@ -140,13 +143,13 @@ def generate_distributed_child(generate_func):
         if len(iter_entries[0]) > 0: # all([len(e) > 0 for e in iter_entries[0]]):
             scores = generate_func(**{k: v for k, v in data_subset.items() if not k.startswith('_')})
             for idx, g in zip(data_subset_ids, scores): 
-                data[0]['_dist'][idx]['score'] = g
+                data[0]['_dist'][idx]['output'] = g
     elif isinstance(data_subset, list):
         data_subset_ids = [data_subset[i]['_dist']['id'] for i in range(len(data_subset)) if data_subset[i]['_dist']['device'] == device]
         data_subset = [sent for i, sent in enumerate(data[0]) if data[0][i]['_dist']['device'] == device]
         scores = generate_func(data_subset)
         for idx, g in zip(data_subset_ids, scores): 
-            data[0][idx]['_dist']['score'] = g
+            data[0][idx]['_dist']['output'] = g
 
     # Wait for GPUs 1 ... local_rank to finish generating
     # i.e., Generation goes in order from 1, 2, 3, ..., 8, 0
