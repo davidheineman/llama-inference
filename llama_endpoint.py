@@ -116,8 +116,7 @@ def llama_generate(input_text, **kwargs):
     generation = model.generate(
         **inputs, 
         **params,
-        use_cache=True,
-        beam_search_batch_size=BATCH_SIZE
+        use_cache=True
     )
     
     # If 'output_scores': True, return those scores 
